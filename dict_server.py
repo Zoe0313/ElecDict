@@ -7,6 +7,7 @@ from socket import *
 from multiprocessing import Process
 import signal
 import sys
+import time
 from operation_db import *
 
 # 全局变量
@@ -14,6 +15,7 @@ HOST = '0.0.0.0'
 PORT = 8000
 ADDR = (HOST,PORT)
 
+# 处理注册 R name passwd
 def do_register(c,db,data):
     l = data.split(' ')
     name = l[1]
@@ -23,6 +25,7 @@ def do_register(c,db,data):
     else:
         c.send(b'FAIL')
 
+# 处理登录 L name passwd
 def do_login(c,db,data):
     l = data.split(' ')
     name = l[1]
@@ -32,16 +35,58 @@ def do_login(c,db,data):
     else:
         c.send(b'FAIL')
 
+# 处理查询 Q name word
+def do_query(c,db,data):
+    l = data.split(' ')
+    name = l[1]
+    word = l[2]
+    # 插入历史记录
+    db.insert_history(name,word)
+    # 查单词 没有查到返回None
+    mean = db.query(word)
+    if not mean:
+        c.send('没有找到该单词'.encode())
+    else:
+        msg = "%s : %s"%(word,mean)
+        c.send(msg.encode())
+
+# 处理历史记录 H name
+def do_history(c,db,data):
+    l = data.split(' ')
+    name = l[1]
+    # 查询10条历史记录
+    r = db.history(name)
+    if not r:
+        c.send(b'FAIL')
+        return
+
+    c.send(b'OK')
+    for i in r:
+        # i -> (name,word,time)
+        msg = '%s %s %s'%i
+        time.sleep(0.1) # 防止粘包
+        c.send(msg.encode())
+    time.sleep(0.1)
+    c.send(b'##')
+
 # 处理客户端请求
 def do_request(c,db):
     db.create_cursor() # 生成游标
     while True:
         data = c.recv(1024).decode()
         print(c.getpeername(),':',data)
-        if data[0] == 'R':
+        if not data or data[0] == 'E':
+            #db.close()
+            c.close()
+            sys.exit('客户端退出')#退出子进程
+        elif data[0] == 'R':
             do_register(c,db,data)
         elif data[0] == 'L':
             do_login(c,db,data)
+        elif data[0] == 'Q':
+            do_query(c,db,data)
+        elif data[0] == 'H':
+            do_history(c,db,data)
 
 # 网络连接
 def main():
@@ -64,6 +109,7 @@ def main():
             print("Connect from:",addr)
         except KeyboardInterrupt:
             s.close()
+            db.close()
             sys.exit('服务器退出')
         except Exception as e:
             print('Failed:',e)
